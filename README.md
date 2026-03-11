@@ -34,7 +34,6 @@ lumiatech-app/
 ├── src/                    # Java source code
 ├── pom.xml                 # Maven build configuration
 ├── Dockerfile              # Container image definition
-├── Jenkinsfile             # CI/CD pipeline
 └── README.md
 ```
 
@@ -166,16 +165,16 @@ helm version
 # Create EKS cluster
 eksctl create cluster \
   --name lumiatech-cluster \
-  --region us-east-1 \
+  --region us-east-2 \
   --nodegroup-name lumiatech-nodes \
   --node-type t3.medium \
   --nodes 2 \
   --nodes-min 1 \
-  --nodes-max 3 \
+  --nodes-max 5 \
   --managed
 
 # Configure kubectl context
-aws eks update-kubeconfig --region us-east-1 --name lumiatech-cluster
+aws eks update-kubeconfig --region us-east-2 --name lumiatech-cluster
 ```
 
 ### Install NGINX Ingress Controller
