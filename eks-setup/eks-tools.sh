@@ -10,13 +10,9 @@ apt update -y
 
 # Provisioning tools for the cluster setup
 
-yum --help &>> /dev/null
-if [ $? -eq 0 ]
-then
-  yum install zip unzip -y
-else
-  apt update && apt install zip unzip -y
-fi
+
+apt update && apt install zip unzip -y
+
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 unzip awscliv2.zip
 sudo ./aws/install
