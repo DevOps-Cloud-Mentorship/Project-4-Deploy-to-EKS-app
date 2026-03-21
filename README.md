@@ -1,373 +1,179 @@
-# lumiatech Java Application - Kubernetes Deployment
+# Project 4 — Lumiatech App Repository
 
-## Overview
+This repository contains the **Java Spring MVC application source code, Docker images, and GitHub Actions CI pipeline**. On every push to `main`, the pipeline builds the app, pushes Docker images to Docker Hub, and updates the image tags in the manifest repository so the EKS cluster picks up the new version automatically.
 
-This project deploys a Java web application (lumiatech) to a Kubernetes cluster using a GitOps approach with two separate repositories:
+Kubernetes manifests and cluster setup are maintained separately in **[Project-4-Deploy-to-EKS-manifest](https://github.com/Ndzenyuy/Project-4-Deploy-to-EKS-manifest)**.
 
-- **Application Repository**: Contains source code, Dockerfile, and CI/CD pipeline
-- **Manifest Repository**: Contains Kubernetes manifests and Helm charts for deployment
+![Architecture](images/project-4-deploy-to-eks.png)
 
-## Architecture
+---
 
-![Kubernetes Architecture Diagram](./images/project-4-deploy-to-eks.png)
+## Pipeline Overview
 
-- **Application**: Java Spring MVC application (WAR file)
-- **Database**: MySQL
-- **Orchestration**: Kubernetes
-- **Deployment Tool**: Helm
-- **Ingress**: NGINX Ingress Controller
+```
+[Push to main]
+      │
+      ▼
+[GitHub Actions]
+  ├── Build WAR (Maven)
+  ├── Build & Push Docker images → Docker Hub
+  │     ├── ndzenyuy/lumia-app:<git-sha>
+  │     └── ndzenyuy/lumia-db:<git-sha>
+  └── Clone manifest repo → update image tags → push
+```
+
+---
+
+## Application Stack
+
+| Service    | Technology         | Purpose               |
+|------------|--------------------|-----------------------|
+| App        | Tomcat 10 / JDK 21 | Spring MVC WAR        |
+| Database   | MySQL 8.0.33       | Accounts data         |
+| Cache      | Memcached          | Session/query caching |
+| Messaging  | RabbitMQ           | Async message queue   |
+| Search     | Elasticsearch 7.10 | Full-text search      |
+| Web/Proxy  | Nginx              | Reverse proxy (local) |
+
+---
 
 ## Prerequisites
 
-- Kubernetes cluster (v1.35)
-- kubectl configured
-- Helm 3.x installed
-- Docker registry access
-- NGINX Ingress Controller installed in cluster
+| Tool       | Version | Install Reference                                      |
+|------------|---------|--------------------------------------------------------|
+| Java (JDK) | 17      | [Adoptium](https://adoptium.net)                       |
+| Maven      | 3.8+    | [maven.apache.org](https://maven.apache.org)           |
+| Docker     | 24+     | [docs.docker.com](https://docs.docker.com/get-docker/) |
+| Git        | any     |                                                        |
+
+---
 
 ## Repository Structure
 
-### Application Repository
-
 ```
-lumiatech-app/
-├── src/                    # Java source code
-├── pom.xml                 # Maven build configuration
-├── Dockerfile              # Container image definition
-└── README.md
-```
-
-### Manifest Repository
-
-```
-lumiatech-manifests/
-├── kubedefs/
-│   ├── appdeploy.yaml      # Application deployment
-│   ├── appservice.yaml     # Application service
-│   ├── appingress.yaml     # NGINX ingress
-│   ├── dbdeploy.yaml       # Database deployment
-│   ├── dbservice.yaml      # Database service
-│   ├── dbpvc.yaml          # Persistent volume claim
-│   └── secret.yaml         # Application secrets
-└── README.md
+.
+├── .github/workflows/
+│   └── build-and-update.yml   # CI/CD pipeline
+├── Docker-files/
+│   ├── app/Dockerfile          # Tomcat app image
+│   ├── db/Dockerfile           # MySQL image with seed data
+│   ├── web/Dockerfile          # Nginx reverse proxy (local)
+│   └── docker-compose.yml      # Local development stack
+└── src/                        # Java Spring MVC source
 ```
 
-## Deployment Components
+---
 
-### Application Deployment
+## Setup
 
-- **Image**: `ndzenyuy/lumia-app:latest`
-- **Port**: 8080
-- **Init Containers**: Wait for database service
-- **Service Type**: ClusterIP
-- **Environment Variables**: Database connection details
-
-### Database Deployment
-
-- **Image**: `ndzenyuy/lumia-db:latest`
-- **Port**: 3306
-- **Storage**: PersistentVolumeClaim (3Gi, gp2 storage class)
-- **Credentials**: Stored in Kubernetes Secret
-
-### Ingress
-
-- **Host**: `www.lumiatechs.com`
-- **Path**: `/`
-- **Backend**: lumia-app-service:8080
-
-## Docker Images Build and Push
-
-### Prerequisites for Building Images
-
-- Docker installed and running
-- Docker Hub account
-- Maven 3.6+ installed
-- Java 17+ installed
-
-### Build and Push Process
-
-The application source code is located in the `src/` folder and uses Maven for building.
-
-#### Option 1: Automated Script (Recommended)
+### 1. Clone the Repository
 
 ```bash
-# Make script executable
-chmod +x build-and-push.sh
-
-# Run the build and push script
-./build-and-push.sh
+git clone https://github.com/Ndzenyuy/Project-4-Deploy-to-EKS-app.git
+cd Project-4-Deploy-to-EKS-app
 ```
 
-#### Option 2: Manual Steps
+---
+
+### 2. Configure Application Properties
+
+Edit `src/main/resources/application.properties` with your environment's connection details:
+
+```properties
+# Database
+jdbc.url=jdbc:mysql://<db-host>:3306/accounts
+jdbc.username=<db-username>
+jdbc.password=<db-password>
+
+```
+
+> When deploying to EKS, these hostnames must match the Kubernetes service names defined in the manifest repo.
+
+---
+
+### 3. Build the Application
 
 ```bash
-# 1. Login to Docker Hub
+mvn clean package -DskipTests
+```
+
+Output: `target/lumiatech-v1.war`
+
+---
+
+### 4. Build and Push Docker Images Manually (Optional)
+
+Use this to push images without triggering the CI pipeline:
+
+```bash
 docker login
-
-# 2. Build Java application (source code in src/ folder)
-mvn clean install -DskipTests
-
-# 3. Build application Docker image
+mvn clean package -DskipTests
 docker build -t ndzenyuy/lumia-app:latest -f Docker-files/app/Dockerfile .
-
-# 4. Build database Docker image
 docker build -t ndzenyuy/lumia-db:latest -f Docker-files/db/Dockerfile Docker-files/db/
-
-# 5. Push images to Docker Hub
 docker push ndzenyuy/lumia-app:latest
 docker push ndzenyuy/lumia-db:latest
-
-# 6. Verify images
-docker images | grep -E "(lumia-app|lumia-db)"
 ```
 
-### Image Details
+---
 
-- **Application Image**: Built from Java source code in `src/` folder using Maven
-- **Database Image**: MySQL 8.0.33 with pre-loaded database schema
-- **Build Context**: Application builds from project root to access `target/` directory
+### 5. Configure GitHub Actions Secrets
 
-### Docker Hub Images
+Go to **Settings → Secrets and variables → Actions** in this repository and add:
 
-- **Application**: `ndzenyuy/lumia-app:latest`
-- **Database**: `ndzenyuy/lumia-db:latest`
+| Secret Name             | Description                                            |
+|-------------------------|--------------------------------------------------------|
+| `DOCKERHUB_USERNAME`    | Your Docker Hub username                               |
+| `DOCKERHUB_TOKEN`       | Docker Hub access token (not your password)            |
+| `MANIFEST_REPO_SSH_KEY` | Private SSH key with write access to the manifest repo |
 
-## AWS EKS Cluster Setup
-
-### Prerequisites
-
-- AWS CLI configured with appropriate credentials
-- IAM permissions to create EKS clusters and related resources
-
-### Install Required Tools
+Generate the SSH key pair for the manifest repo:
 
 ```bash
-# Install kubectl
-curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-
-# Install eksctl
-curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
-sudo mv /tmp/eksctl /usr/local/bin
-
-# Install Helm
-curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-
-# Verify installations
-kubectl version --client
-eksctl version
-helm version
+ssh-keygen -t ed25519 -C "github-actions" -f manifest_deploy_key -N ""
 ```
 
-### Create EKS Cluster
+- Add `manifest_deploy_key.pub` as a **Deploy Key** in the manifest repository (with write access)
+- Add `manifest_deploy_key` (private key) as the `MANIFEST_REPO_SSH_KEY` secret here
+
+---
+
+### 6. CI/CD Pipeline
+
+On every push to `main`, `.github/workflows/build-and-update.yml` runs two jobs:
+
+**Job 1 — `build-and-push`**
+1. Checks out this repo
+2. Sets up JDK 17 and builds the WAR with Maven
+3. Logs in to Docker Hub
+4. Builds and pushes `ndzenyuy/lumia-app:<git-sha>` and `:latest`
+5. Builds and pushes `ndzenyuy/lumia-db:<git-sha>` and `:latest`
+
+**Job 2 — `update-manifests`** (runs after Job 1)
+1. Clones the manifest repo via SSH
+2. Updates `helm/lumiatech/values.yaml` with the new `<git-sha>` image tags
+3. Commits and pushes the change back to the manifest repo
+
+ArgoCD in the EKS cluster detects the manifest change and rolls out the new images automatically.
+
+---
+
+### 7. Local Development with Docker Compose
 
 ```bash
-# Create EKS cluster
-eksctl create cluster \
-  --name lumiatech-cluster \
-  --region us-east-2 \
-  --nodegroup-name lumiatech-nodes \
-  --node-type t3.medium \
-  --nodes 2 \
-  --nodes-min 1 \
-  --nodes-max 5 \
-  --managed
-
-# Configure kubectl context
-aws eks update-kubeconfig --region us-east-2 --name lumiatech-cluster
+cd Docker-files
+docker compose up --build
 ```
 
-### Install NGINX Ingress Controller
+| Service   | Port  |
+|-----------|-------|
+| Nginx     | 80    |
+| Tomcat    | 8080  |
+| MySQL     | 3306  |
 
-```bash
-# Deploy NGINX Ingress Controller for AWS
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.8.1/deploy/static/provider/aws/deploy.yaml
 
-# Wait for ingress controller to be ready
-kubectl wait --namespace ingress-nginx \
-  --for=condition=ready pod \
-  --selector=app.kubernetes.io/component=controller \
-  --timeout=120s
-```
+---
 
-### Verify Cluster
+## Related Repository
 
-```bash
-# Check cluster status
-kubectl cluster-info
-
-# Check nodes
-kubectl get nodes
-
-# Check system pods
-kubectl get pods -n kube-system
-
-# Check ingress controller
-kubectl get pods -n ingress-nginx
-kubectl get svc -n ingress-nginx
-
-# Get ingress load balancer URL
-kubectl get svc ingress-nginx-controller -n ingress-nginx -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
-```
-
-## Deployment Steps
-
-### 1. Clone Repositories
-
-```bash
-# Application repository
-git clone <app-repo-url>
-
-# Manifest repository
-git clone <manifest-repo-url>
-```
-
-### 2. Create Namespace
-
-```bash
-kubectl create namespace lumiatech
-kubectl config set-context --current --namespace=lumiatech
-```
-
-### 3. Deploy Using Kubectl
-
-```bash
-cd kubedefs
-
-# Deploy in order
-kubectl apply -f secret.yaml
-kubectl apply -f dbpvc.yaml
-kubectl apply -f dbdeploy.yaml
-kubectl apply -f dbservice.yaml
-kubectl apply -f appdeploy.yaml
-kubectl apply -f appservice.yaml
-kubectl apply -f appingress.yaml
-
-# Or deploy all at once
-kubectl apply -f .
-```
-
-### 4. Verify Deployment
-
-```bash
-kubectl get pods -n lumiatech
-kubectl get svc -n lumiatech
-kubectl get ingress -n lumiatech
-```
-
-### 5. Access Application
-
-```bash
-# Get ingress load balancer URL
-kubectl get svc ingress-nginx-controller -n ingress-nginx -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
-
-# Update /etc/hosts or DNS
-echo "<INGRESS_LB_URL> www.lumiatechs.com" >> /etc/hosts
-
-# Access via browser
-http://www.lumiatechs.com
-```
-
-## CI/CD Pipeline
-
-### Build & Push
-
-1. Maven builds WAR file
-2. Docker builds container image
-3. Image pushed to registry
-4. Trigger manifest repository update
-
-### Deploy
-
-1. Update image tag in values.yaml
-2. Commit to manifest repository
-3. Helm upgrade deployment
-4. Kubernetes rolls out new version
-
-## Configuration
-
-### Secrets
-
-Update `secret.yaml` with base64 encoded values:
-
-```bash
-echo -n 'your-password' | base64
-```
-
-### Environment Variables
-
-- `DB_HOST`: Database service name (lumiadb)
-- `DB_PORT`: Database port (3306)
-- `DB_NAME`: Database name (accounts)
-- `DB_USER`: Database user (root)
-- `DB_PASS`: Database password (from secret)
-- `MYSQL_ROOT_PASSWORD`: Database root password (from secret)
-
-### Persistent Storage
-
-- Database uses PVC for data persistence
-- Storage class: gp2 (AWS EBS)
-- Storage size: 3Gi
-
-### Docker Images
-
-- **Application**: `ndzenyuy/lumia-app:latest`
-- **Database**: `ndzenyuy/lumia-db:latest`
-
-### Ingress Configuration
-
-- **Domain**: www.lumiatechs.com
-- **Ingress Controller**: NGINX
-- **Backend Service**: lumia-app-service:8080
-
-## Monitoring & Troubleshooting
-
-### Check Logs
-
-```bash
-kubectl logs -f deployment/lumia-app -n lumiatech
-kubectl logs -f deployment/lumiadb -n lumiatech
-```
-
-### Debug Pods
-
-```bash
-kubectl describe pod <pod-name> -n lumiatech
-kubectl exec -it <pod-name> -n lumiatech -- /bin/bash
-```
-
-### Common Issues
-
-- **Init containers stuck**: Check service DNS resolution
-- **ImagePullBackOff**: Verify registry credentials
-- **CrashLoopBackOff**: Check application logs and database connectivity
-
-## Cleanup
-
-```bash
-# Delete all resources
-kubectl delete -f kubedefs/
-
-# Delete namespace
-kubectl delete namespace lumiatech
-
-# Delete EKS cluster (optional)
-eksctl delete cluster --name lumiatech-cluster --region us-east-1
-```
-
-## Security Considerations
-
-- Secrets stored in Kubernetes Secret (consider using Sealed Secrets or External Secrets Operator)
-- Use private container registry
-- Implement RBAC policies
-- Enable network policies
-- Regular security scanning of images
-
-## Future Enhancements
-
-- Add Horizontal Pod Autoscaler (HPA)
-- Implement monitoring with Prometheus/Grafana
-- Add centralized logging with ELK/EFK stack
-- Implement GitOps with ArgoCD/FluxCD
-- Add health checks and readiness probes
-- Implement blue-green or canary deployments
+Kubernetes manifests (Helm chart) and EKS cluster setup:  
+**[Project-4-Deploy-to-EKS-manifest](https://github.com/Ndzenyuy/Project-4-Deploy-to-EKS-manifest)**
